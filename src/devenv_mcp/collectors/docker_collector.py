@@ -5,10 +5,10 @@ except ImportError:
     docker = None
 
 def collect_containers() -> Dict[str,Any]:
-    """
+    '''
         Collects Docker container state and resource configuration.
         Does not diagnose, assess, or rank container behavior.
-    """
+    '''
 
     if not docker:
         return {'containers': [], 'error': 'Docker SDK not installed'}
@@ -42,7 +42,7 @@ def collect_containers() -> Dict[str,Any]:
     
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     import json
     data = collect_containers()
     print(json.dumps(data, indent=2))

@@ -5,12 +5,12 @@ except ImportError:
     psutil = None
 
 def collect_processes() -> Dict[str, Any]:
-    """ Collects information about running processes on the system.
+    ''' Collects information about running processes on the system.
         Does not diagnose, assess, or rank process behavior.
-    """
+    '''
 
     if not psutil:
-        return {"processes": [], "access_denied": [{'error': 'psutil library is not installed'}]}
+        return {'processes': [], 'access_denied': [{'error': 'psutil library is not installed'}]}
 
     processes = []
     access_denied = []
@@ -33,8 +33,8 @@ def collect_processes() -> Dict[str, Any]:
         except (psutil.NoSuchProcess):
             continue
     
-    return {"processes": processes, "access_denied": access_denied}
+    return {'processes': processes, 'access_denied': access_denied}
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     collect_processes()
