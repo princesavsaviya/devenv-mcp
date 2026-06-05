@@ -1,5 +1,5 @@
 from unittest.mock import patch
-from devenv_mcp.diagnostics.report import diagnose_ports,diagnose_containers
+from devenv_mcp.diagnostics.report import diagnose_ports,diagnose_containers,diagnose_environment
 
 FAKE_PROCESS = {
     'pid': 1234,
@@ -44,6 +44,30 @@ FAKE_CONTAINER_WITH_PORTS = {
 FAKE_CONTAINER_NO_PORTS = {
     **FAKE_CONTAINER,
     'ports': {}
+}
+
+FAKE_ENV_VAR_PRESENT = {
+    'name': 'DATABASE_URL',
+    'present': True,
+    'empty': False,
+    'value': '***',
+    'value_length': 20
+}
+
+FAKE_ENV_VAR_MISSING = {
+    'name': 'DATABASE_URL',
+    'present': False,
+    'empty': False,
+    'value': None,
+    'value_length': None
+}
+
+FAKE_ENV_VAR_EMPTY = {
+    'name': 'DATABASE_URL',
+    'present': True,
+    'empty': True,
+    'value': '***',
+    'value_length': 0
 }
 
 def test_port_not_found():
@@ -160,7 +184,6 @@ def test_restart_crash_exit_code():
 
         assert result[5432]['severity'] == 'warning'
 
-
 def test_container_not_found():
     with patch('devenv_mcp.diagnostics.report.collect_ports') as mock_ports, \
          patch('devenv_mcp.diagnostics.report.collect_processes') as mock_processes, \
@@ -231,3 +254,78 @@ def test_zombie_process_unhealthy_container():
 
         assert result['db']['severity'] == 'critical'
 
+def test_env_present_no_service():
+    with patch('devenv_mcp.diagnostics.report.collect_env') as mock_env, \
+         patch('devenv_mcp.diagnostics.report.collect_ports') as mock_ports, \
+         patch('devenv_mcp.diagnostics.report.collect_containers') as mock_containers:
+        mock_ports.return_value = {'ports': [], 'errors': []}
+        mock_containers.return_value = {'containers': []}
+        mock_env.return_value = {'env_data': [FAKE_ENV_VAR_PRESENT], 'errors': []}
+
+        result = diagnose_environment([{'name': 'DATABASE_URL'}])
+
+        assert result['DATABASE_URL']['severity'] == 'ok'
+        assert result['DATABASE_URL']['issues'] == ['No issues detected']
+
+
+def test_env_missing_no_service():
+    with patch('devenv_mcp.diagnostics.report.collect_env') as mock_env, \
+         patch('devenv_mcp.diagnostics.report.collect_ports') as mock_ports, \
+         patch('devenv_mcp.diagnostics.report.collect_containers') as mock_containers:
+        mock_ports.return_value = {'ports': [], 'errors': []}
+        mock_containers.return_value = {'containers': []}
+        mock_env.return_value = {'env_data': [FAKE_ENV_VAR_MISSING], 'errors': []}
+
+        result = diagnose_environment([{'name': 'DATABASE_URL'}])
+
+        assert result['DATABASE_URL']['severity'] == 'warning'
+        assert result['DATABASE_URL']['issues'] == ['DATABASE_URL is not set']
+
+def test_env_empty_var():
+    with patch('devenv_mcp.diagnostics.report.collect_env') as mock_env, \
+         patch('devenv_mcp.diagnostics.report.collect_ports') as mock_ports, \
+         patch('devenv_mcp.diagnostics.report.collect_containers') as mock_containers:
+        mock_ports.return_value = {'ports': [], 'errors': []}
+        mock_containers.return_value = {'containers': []}
+        mock_env.return_value = {'env_data': [FAKE_ENV_VAR_EMPTY], 'errors': []}
+
+        result = diagnose_environment([{'name': 'DATABASE_URL'}])
+
+        assert result['DATABASE_URL']['severity'] == 'critical'
+        assert result['DATABASE_URL']['issues'] == ['DATABASE_URL is set but empty']
+
+def test_env_missing_service_running():
+    with patch('devenv_mcp.diagnostics.report.collect_env') as mock_env, \
+        patch('devenv_mcp.diagnostics.report.collect_ports') as mock_ports,\
+        patch('devenv_mcp.diagnostics.report.collect_containers') as mock_containers:
+        mock_ports.return_value = {'ports': [{**FAKE_PORT,'status':'LISTEN'}], 'errors': []}
+        mock_env.return_value = {'env_data': [FAKE_ENV_VAR_MISSING], 'errors': []}
+        mock_containers.return_value = {'containers' : []}
+
+        result = diagnose_environment([{'name': 'DATABASE_URL','port': 5432}])
+
+        assert result['DATABASE_URL']['severity'] == 'warning'
+
+def test_env_present_service_not_running():
+     with patch('devenv_mcp.diagnostics.report.collect_env') as mock_env, \
+        patch('devenv_mcp.diagnostics.report.collect_ports') as mock_ports, \
+        patch('devenv_mcp.diagnostics.report.collect_containers') as mock_containers:
+        mock_ports.return_value = {'ports': [], 'errors': []}
+        mock_containers.return_value = {'containers' : []}
+        mock_env.return_value = {'env_data': [FAKE_ENV_VAR_PRESENT], 'errors': []}
+
+        result = diagnose_environment([{'name': 'DATABASE_URL','port': 5432}])
+
+        assert result['DATABASE_URL']['severity'] == 'critical'
+
+def test_env_missing_service_not_running():
+    with patch('devenv_mcp.diagnostics.report.collect_env') as mock_env,\
+        patch('devenv_mcp.diagnostics.report.collect_ports') as mock_ports, \
+        patch('devenv_mcp.diagnostics.report.collect_containers') as mock_containers:
+        mock_env.return_value = {'env_data': [FAKE_ENV_VAR_MISSING], 'errors': []}
+        mock_containers.return_value = {'containers' : []}
+        mock_ports.return_value = {'ports': [], 'errors': []}
+
+        result = diagnose_environment([{'name': 'DATABASE_URL','port': 5432}])
+
+        assert result['DATABASE_URL']['severity'] == 'critical'

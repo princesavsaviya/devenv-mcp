@@ -3,6 +3,7 @@ from typing import List, Dict, Any
 from devenv_mcp.collectors.ports import collect_ports
 from devenv_mcp.collectors.docker_collector import collect_containers
 from devenv_mcp.collectors.processes import collect_processes
+from devenv_mcp.collectors.env import collect_env
 
 RESTART_COUNT_THRESHOLD = 2 # >= comparison for restarts
 PROBLEMATIC_PROCESS_STATUSES = {'zombie', 'disk-sleep', 'stopped'}
@@ -11,6 +12,9 @@ PROBLEMATIC_CONTAINER_STATUSES = {'restarting'}
 PROBLEMATIC_CONTAINER_HEALTH = {'unhealthy'}
 CRASH_EXIT_CODES = {1, 137, 143}
 PROBLEMATIC_PORT_STATES = {'CLOSE_WAIT', 'TIME_WAIT'}
+
+ACTIVE_PORT_STATUSES = {'LISTEN','ESTABLISHED'}
+ACTIVE_CONTAINER_STATUSES = {'running'}
 
 
 def diagnose_ports(PORTS:List[int]):
@@ -279,6 +283,88 @@ def diagnose_containers(containers:List[str]):
 
     return results
 
+def diagnose_environment(variables: List[Dict]) -> Dict[str, Any]:
+    '''
+    Diagnoses environment variable presence and correlates with service state.
+    Does not diagnose causes or interpret variable values.
+    '''
+    results = {}
+
+    clctd_ports = collect_ports()
+    clctd_containers = collect_containers()
+
+    active_ports = {p['port'] for p in clctd_ports['ports'] if p['status'] in ACTIVE_PORT_STATUSES}
+    named_containers = {key['name']: key for key in clctd_containers['containers'] if key['status'] in ACTIVE_CONTAINER_STATUSES}
+
+
+    for var in variables:
+        name = var['name']
+        port = var.get('port')        # optional
+        container = var.get('container')  # optional
+        var_redacted = var.get('redacted', True)  # safe by default
+        issues = []
+        severity = 'ok'
+
+        env_result = collect_env([name],var_redacted)
+        var_info = env_result['env_data'][0]
+        present = var_info['present']
+        empty = var_info['empty']
+
+        port_active = None
+        if port:
+            port_active = True if port in active_ports else False
+
+        container_status = None
+        if container:
+            container_status = container in named_containers
+
+        severity = 'ok'
+        running = None
+        if port_active is not None and container_status is not None:
+            running = port_active & container_status
+        elif port_active is not None:
+            running = port_active
+        elif container_status is not None:
+            running = container_status
+        
+        if running is None:
+            if not present:
+                issues.append(f'{name} is not set')
+                severity = 'warning'
+            elif empty:
+                pass
+        elif present and running:
+            severity = 'ok'
+        elif present and not running:
+            issues.append(f'{name} is set but the service is not running')
+            severity = 'critical'
+        elif not present and running:
+            issues.append(f'{name} is missing but the service is running')
+            severity = 'warning'
+        else:
+            issues.append(f'{name} is missing and the service is not running')
+            severity = 'critical'
+
+        if empty:
+            severity = 'critical'
+            issues.append(f'{name} is set but empty')
+        
+        results[name] = {
+            'severity': severity,
+            'present': present,
+            'empty': empty,
+            'value_length': var_info['value_length'],
+            'service': {
+                'port': port,
+                'port_active': port_active,
+                'container': container,
+                'container_status': container_status
+            } if port or container else None,
+            'issues': issues if issues else ['No issues detected']
+        }
+        
+    return results
+
 if __name__ == '__main__':
     import json
     PORTS_TO_DIAGNOSE = [80, 7260]
@@ -287,4 +373,11 @@ if __name__ == '__main__':
 
     CONTAINERS_TO_DIAGNOSE = ['buildx_buildkit_mybuilder0']
     diagnosis_result = diagnose_containers(CONTAINERS_TO_DIAGNOSE)
+    print(json.dumps(diagnosis_result, indent=2))
+
+    ENV_VARS_TO_DIAGNOSE = [
+    {'name': 'PATH'},
+    {'name': 'SOME_MISSING_VAR'},
+    ]
+    diagnosis_result = diagnose_environment(ENV_VARS_TO_DIAGNOSE)
     print(json.dumps(diagnosis_result, indent=2))
