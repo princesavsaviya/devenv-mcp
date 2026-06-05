@@ -28,7 +28,8 @@ def collect_containers() -> Dict[str,Any]:
                     'exit_code': container.attrs['State'].get('ExitCode', 0),
                     'memory_limit_mb': round(container.attrs['HostConfig']['Memory'] / (1024 * 1024), 2) if container.attrs['HostConfig']['Memory'] else None,
                     'created': container.attrs['Created'],
-                    'ports': container.attrs['NetworkSettings']['Ports']
+                    'ports': container.attrs['NetworkSettings']['Ports'],
+                    'pid': container.attrs['State'].get('Pid', None)
                 }
                 container_info.append(info)
             except docker.errors.NotFound:

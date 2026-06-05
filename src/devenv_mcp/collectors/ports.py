@@ -53,4 +53,6 @@ def collect_ports() -> Dict[str,Any]:
     return {'ports': ports, 'errors': errors}
 
 if __name__ == '__main__':
-    collect_ports()
+    import json
+    result = collect_ports()
+    print(json.dumps(result, indent=2))
