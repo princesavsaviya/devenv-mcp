@@ -1,5 +1,5 @@
 from unittest.mock import patch
-from devenv_mcp.diagnostics.report import diagnose_ports
+from devenv_mcp.diagnostics.report import diagnose_ports,diagnose_containers
 
 FAKE_PROCESS = {
     'pid': 1234,
@@ -34,6 +34,16 @@ FAKE_CONTAINER = {
     'created': '2024-01-01',
     'ports': {'5432/tcp': [{'HostIp': '0.0.0.0', 'HostPort': '5432'}]},
     'pid': 1234
+}
+
+FAKE_CONTAINER_WITH_PORTS = {
+    **FAKE_CONTAINER,
+    'ports': {'5432/tcp': [{'HostIp': '0.0.0.0', 'HostPort': '5432'}]}
+}
+
+FAKE_CONTAINER_NO_PORTS = {
+    **FAKE_CONTAINER,
+    'ports': {}
 }
 
 def test_port_not_found():
@@ -91,7 +101,7 @@ def test_unhealthy_container():
 
         assert result[5432]['severity'] == 'warning'
 
-def test_Zombie_process_unhealthy_container():
+def test_zombie_process_unhealthy_container_ports():
     with patch('devenv_mcp.diagnostics.report.collect_ports') as mock_ports, \
          patch('devenv_mcp.diagnostics.report.collect_processes') as mock_processes, \
          patch('devenv_mcp.diagnostics.report.collect_containers') as mock_containers:
@@ -134,7 +144,7 @@ def test_pid_none():
 
         result = diagnose_ports([5432])
 
-        assert 'Port is Open but associated process is not running' not in result[5432]['issues']
+        assert 'Port is open but associated process is not running' not in result[5432]['issues']
 
 def test_restart_crash_exit_code():
     with patch('devenv_mcp.diagnostics.report.collect_ports') as mock_ports, \
@@ -149,3 +159,75 @@ def test_restart_crash_exit_code():
         result = diagnose_ports([5432])
 
         assert result[5432]['severity'] == 'warning'
+
+
+def test_container_not_found():
+    with patch('devenv_mcp.diagnostics.report.collect_ports') as mock_ports, \
+         patch('devenv_mcp.diagnostics.report.collect_processes') as mock_processes, \
+         patch('devenv_mcp.diagnostics.report.collect_containers') as mock_containers:
+
+        mock_ports.return_value = {'ports': [FAKE_PORT], 'errors': []}
+        mock_processes.return_value = {'processes': [FAKE_PROCESS], 'access_denied': []}
+        mock_containers.return_value = {'containers': []}
+
+        result = diagnose_containers(['db'])
+
+        assert result['db']['status'] == 'not found'
+
+def test_healthy_container_with_ports():
+    with patch('devenv_mcp.diagnostics.report.collect_ports') as mock_ports, \
+         patch('devenv_mcp.diagnostics.report.collect_processes') as mock_processes, \
+         patch('devenv_mcp.diagnostics.report.collect_containers') as mock_containers:
+
+        mock_ports.return_value = {'ports': [FAKE_PORT], 'errors': []}
+        mock_processes.return_value = {'processes': [FAKE_PROCESS], 'access_denied': []}
+        mock_containers.return_value = {'containers': [FAKE_CONTAINER_WITH_PORTS]}
+
+        result = diagnose_containers(['db'])
+
+        assert result['db']['severity'] == 'ok'
+        assert len(result['db']['ports']) == 1
+
+def test_unhealthy_container_no_ports():
+    with patch('devenv_mcp.diagnostics.report.collect_ports') as mock_ports, \
+         patch('devenv_mcp.diagnostics.report.collect_processes') as mock_processes, \
+         patch('devenv_mcp.diagnostics.report.collect_containers') as mock_containers:
+
+        mock_ports.return_value = {'ports': [FAKE_PORT], 'errors': []}
+        mock_processes.return_value = {'processes': [FAKE_PROCESS], 'access_denied': []}
+        mock_containers.return_value = {'containers': [{**FAKE_CONTAINER_NO_PORTS,'health': 'unhealthy'}]}
+
+        result = diagnose_containers(['db'])
+
+        assert result['db']['severity'] == 'warning'
+        assert result['db']['ports'] == []
+
+def test_exited_container():
+    with patch('devenv_mcp.diagnostics.report.collect_ports') as mock_ports, \
+         patch('devenv_mcp.diagnostics.report.collect_processes') as mock_processes, \
+         patch('devenv_mcp.diagnostics.report.collect_containers') as mock_containers:
+
+        mock_ports.return_value = {'ports': [FAKE_PORT], 'errors': []}
+        mock_processes.return_value = {'processes': [FAKE_PROCESS], 'access_denied': []}
+        mock_containers.return_value = {'containers': [{**FAKE_CONTAINER,'status': 'exited'}]}
+
+        result = diagnose_containers(['db'])
+
+        assert result['db']['severity'] == 'critical'
+
+def test_zombie_process_unhealthy_container():
+    with patch('devenv_mcp.diagnostics.report.collect_ports') as mock_ports, \
+         patch('devenv_mcp.diagnostics.report.collect_processes') as mock_processes, \
+         patch('devenv_mcp.diagnostics.report.collect_containers') as mock_containers:
+
+        unhealthy_container = {**FAKE_CONTAINER,'health':'unhealthy'}
+        zombie_process = {**FAKE_PROCESS, 'status': 'zombie'}
+
+        mock_ports.return_value = {'ports': [FAKE_PORT], 'errors': []}
+        mock_processes.return_value = {'processes': [zombie_process], 'access_denied': []}
+        mock_containers.return_value = {'containers': [unhealthy_container]}
+
+        result = diagnose_containers(['db'])
+
+        assert result['db']['severity'] == 'critical'
+
